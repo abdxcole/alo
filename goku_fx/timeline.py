@@ -43,7 +43,11 @@ def detect(lm, alpha, fps, overrides=None):
     # lanzamiento: empuje brusco (velocidad en pantalla o crecimiento hacia la cámara)
     joint = np.where(both[:, None], center.mean(0), np.where(vis[0][:, None], center[0], center[1]))
     joint = _gauss1d(joint.astype(np.float32), 1.0)
-    s_s = _gauss1d(sc[:, None].astype(np.float32), 1.0)[:, 0]
+    # la mano más grande (más cerca de la cámara) delata el empujón hacia el frente
+    big = np.maximum(np.where(vis[0], scale[0], 0), np.where(vis[1], scale[1], 0))
+    big = np.where(any_, big, sc)
+    med = np.array([np.median(big[max(0, t - 2):t + 3]) for t in range(n)], np.float32)  # quita saltos de escala
+    s_s = _gauss1d(med[:, None], 1.0)[:, 0]
     vel = np.gradient(joint, axis=0)
     growth = np.gradient(s_s) / s_s
     speed = np.linalg.norm(vel, axis=1) / s_s
@@ -53,8 +57,10 @@ def detect(lm, alpha, fps, overrides=None):
     launch, direction, mode = None, [1.0, 0.0], "beam"
     if s0 < n - 2:
         seg = push[s0:]
-        peak = int(np.argmax(seg))
-        if seg[peak] > 0.09:
+        top = float(seg.max())
+        # el primer empujón fuerte es el ataque; lo que viene después suele ser bajar los brazos
+        peak = next(k for k in range(len(seg)) if seg[k] >= 0.5 * top and (k + 1 == len(seg) or seg[k + 1] < seg[k]))
+        if top > 0.09:
             on = peak
             while on > 0 and seg[on - 1] > 0.45 * seg[peak]:
                 on -= 1
@@ -63,14 +69,14 @@ def detect(lm, alpha, fps, overrides=None):
             w = slice(lf, min(n, s0 + peak + int(0.12 * fps) + 1))
             v = vel[w].sum(0) / s_s[lf]
             g = growth[w].sum()
-            if np.linalg.norm(v) < 1.2 * g or np.linalg.norm(v) < 0.4:
+            if g > 0.22 or np.linalg.norm(v) < 0.4:
                 mode = "camera"
             else:
                 direction = (v / np.linalg.norm(v)).tolist()
     ev["launch"] = ov.get("launch", launch)
     ev["launch_dir"] = ov.get("launch_dir", direction)
     ev["mode"] = ov.get("mode", mode)
-    ev["beam_duration"] = ov.get("beam_duration", 1.6)
+    ev["beam_duration"] = ov.get("beam_duration", 0.9 if ev["mode"] == "camera" else 1.6)
     ev["aura"] = ov.get("aura", True)
     return ev
 

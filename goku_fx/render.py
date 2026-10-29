@@ -22,6 +22,7 @@ class Plan:
         self.lm_full = lm[..., :2] * sc
         self.ev, self.fps, (self.fw, self.fh) = ev, fps, fsize
         self.last_mid = None
+        self.origin = None
 
     def at(self, i):
         ev, s = self.ev, i / self.fps
@@ -74,10 +75,14 @@ class Plan:
                                         e=0.25 * np.exp(-tf / 0.2)))
 
         if tau is not None:
+            # el origen del ataque sigue a las manos con inercia (no se cae cuando bajas los brazos)
+            follow = 0.06 if ev["mode"] == "camera" else 0.25
+            self.origin = mid.copy() if self.origin is None else self.origin + follow * (mid - self.origin)
+            mid = self.origin
             D = np.asarray(ev["launch_dir"], np.float64)
             D = D / (np.linalg.norm(D) + 1e-9)
             if ev["mode"] == "camera":
-                Rb = Rf * 1.2 + max(self.fw, self.fh) * 0.75 * (1 - np.exp(-tau / 0.22))
+                Rb = Rf * 1.2 + max(self.fw, self.fh) * 0.22 * (1 - np.exp(-tau / 0.18))
                 st["blast"] = dict(c=mid, R=Rb, e=e_b)
             else:
                 Lmax = _ray_exit(mid, D, self.fw, self.fh) + Rf
@@ -91,8 +96,8 @@ class Plan:
 
         aura_end = 1.0 if tau is None else float(1 - smoothstep(dur, dur + 1.2, tau))
         aura = (0.5 * smoothstep(cs, cs + 0.6, s) + 0.3 * charge + 0.3 * mf_t + 0.4 * e_b) * aura_end
-        st["aura"] = float(min(aura, 1.3) * max(al.max(), float(e_b > 0))) if ev.get("aura", True) else 0.0
-        st["darken"] = 0.10 * charge * end_fade + 0.08 * mf_t * end_fade + 0.12 * e_b
+        st["aura"] = float(min(aura, 1.3)) if ev.get("aura", True) else 0.0
+        st["darken"] = 0.14 * charge * end_fade + 0.08 * mf_t * end_fade + 0.12 * e_b
         st["tremor"] = 0.0008 * charge + 0.0015 * mf_t * end_fade
         st["kick"] = 0.0 if tau is None else 0.012 * np.exp(-tau / 0.35) + 0.0025 * e_b
         st["phase"] = ("lanzamiento" if tau is not None and e_b > 0 else "fusión" if mf_t > 0.5
@@ -162,7 +167,8 @@ def render(video, out_path, data, ev, energy="kamehameha", aura_color="azul", sc
 
         m = cv2.resize(masks[i].astype(np.float32) / 255.0, (fw, fh), interpolation=cv2.INTER_LINEAR)
         mask_s = m if mask_s is None else mask_s * 0.35 + m * 0.65
-        fx.aura(E, mask_s, s, st["aura"], apal, noise)
+        Ea = np.zeros_like(E)
+        fx.aura(Ea, mask_s, s, st["aura"], apal, noise)
         fx.aura_sparks(parts, mask_s, st["aura"], rng, apal, fh)
 
         anchors = {}
@@ -218,11 +224,13 @@ def render(video, out_path, data, ev, energy="kamehameha", aura_color="azul", sc
             dy = cv2.resize(dy, (W, H)) * amp
             frame = cv2.remap(frame, gx + dx, gy + dy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
-        bl_, spill = fx.bloom(E)
+        _, spill = fx.bloom(E)
+        E += Ea
+        bl_, _ = fx.bloom(E)
         glow = fx.chroma_shift(E + bl_)
         F = fx.DECODE[frame]
         F *= 1 - st["darken"]
-        F *= 1 + cv2.resize(spill, (W, H), interpolation=cv2.INTER_LINEAR) * 1.4  # luz que rebota en piel y ropa
+        F *= 1 + cv2.resize(spill, (W, H), interpolation=cv2.INTER_LINEAR) * 1.2  # luz que rebota en piel y ropa
         G = cv2.resize(glow, (W, H), interpolation=cv2.INTER_LINEAR)
         lum = np.clip(G.max(axis=2), 0, 1)
         F += G + (grain[i % 3] * lum * 0.012)[..., None]

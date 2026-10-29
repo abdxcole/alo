@@ -207,14 +207,14 @@ def blast(E, heat, c, R, t, energy, pal, noise):
     """Ataque lanzado hacia la cámara: esfera que se abalanza y llena el cuadro con rayos radiales."""
     if energy <= 0.003:
         return
-    orb(E, heat, c, R, t, energy, pal, noise, seed=5, hot=1.3)
+    orb(E, heat, c, R, t, energy * 0.8, pal, noise, seed=5, hot=0.9)
     h, w = E.shape[:2]
     X, Y = np.meshgrid(np.arange(w, dtype=np.float32) - c[0], np.arange(h, dtype=np.float32) - c[1])
     r = np.sqrt(X * X + Y * Y) / R + 1e-4
     s = noise.size
     a = (np.arctan2(Y, X) / TAU + 0.5) * s * 4
     rays = np.clip(1 - np.abs(noise.sample(a, np.log(r + 0.2) * 40 - t * 300, 1)) * 0.9, 0, 1) ** 6
-    E += energy * (rays * np.exp(-np.maximum(r - 0.8, 0) * 0.9) * 1.4)[..., None] * pal.mid
+    E += energy * (rays * np.exp(-np.maximum(r - 0.7, 0) * 1.4) * 0.8)[..., None] * pal.mid
 
 
 def ring(E, heat, c, Rr, width, energy, pal):
@@ -247,7 +247,7 @@ def aura(E, mask, t, level, pal, noise, dt_hint=1 / 30):
             break
         up = np.zeros_like(p)
         up[:-sh] = p[sh:]
-        p = np.maximum(p, up * (0.93 ** (2 ** i)))
+        p = np.maximum(p, up * (0.9 ** (2 ** i)))
     s = noise.size
     xx, yy = np.meshgrid(np.arange(wq, dtype=np.float32), np.arange(hq, dtype=np.float32))
     f = s / (wq * 0.7)
@@ -260,7 +260,7 @@ def aura(E, mask, t, level, pal, noise, dt_hint=1 / 30):
     flames = cv2.GaussianBlur(flames, (0, 0), 1.2)
     halo = cv2.GaussianBlur(m, (0, 0), hq * 0.035)
     outside = 1 - np.clip(m * 1.3, 0, 1)
-    A = (flames * (0.3 + 0.9 * streak) * 0.7 + halo * 0.6) * outside
+    A = (flames * (0.25 + 0.9 * streak) * 0.6 + halo * 0.3) * outside
     er = cv2.erode(m, np.ones((3, 3), np.uint8), iterations=max(1, int(hq * 0.004)))
     rim = cv2.GaussianBlur(np.clip(m - er, 0, 1), (0, 0), 1.5)
     flick = 0.88 + 0.12 * noise.sample(np.float32([[t * 40.0]]), np.float32([[3.0]]), 0)[0, 0]
@@ -268,7 +268,7 @@ def aura(E, mask, t, level, pal, noise, dt_hint=1 / 30):
     rim = cv2.resize(rim, (w, h), interpolation=cv2.INTER_LINEAR)
     k = np.clip(A, 0, 1)[..., None]
     col = pal.outer * (1 - k) + pal.mid * k
-    E += level * (A[..., None] * col * 1.1 + rim[..., None] * (pal.mid * 0.8 + pal.core * 0.3) * 0.9)
+    E += level * (A[..., None] * col * 0.75 + rim[..., None] * (pal.mid * 0.8 + pal.core * 0.3) * 0.6)
 
 
 def aura_sparks(parts, mask, level, rng, pal, H):
@@ -280,11 +280,11 @@ def aura_sparks(parts, mask, level, rng, pal, H):
     ys, xs = np.nonzero(edge)
     if len(xs) == 0:
         return
-    for _ in range(rng.poisson(4 * level)):
+    for _ in range(rng.poisson(2 * level)):
         i = rng.integers(len(xs))
         x, y = xs[i] * 4.0, ys[i] * 4.0
         parts.spawn_free((x + rng.normal() * 4, y), (rng.normal() * 15, -rng.uniform(0.18, 0.45) * H),
-                         rng.uniform(0.3, 0.8), rng.uniform(0.4, 1.0) * level, drag=0.5, behind=True)
+                         rng.uniform(0.25, 0.55), rng.uniform(0.3, 0.7) * level, drag=0.5, behind=True)
 
 
 def bloom(E, weights=(0.32, 0.27, 0.22, 0.18, 0.15, 0.12)):
