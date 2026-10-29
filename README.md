@@ -2,13 +2,17 @@
 
 Toma un video tuyo, sigue tus manos cuadro a cuadro y le añade energía estilo Goku:
 
-1. **Carga**: una esfera de plasma en cada mano (núcleo blanco sobreexpuesto, cuerpo turbulento,
-   filamentos, descargas eléctricas y chispas que se absorben en espiral).
+1. **Carga**: una esfera de plasma que flota sobre cada mano sin tocarla (núcleo blanco sobreexpuesto,
+   cuerpo turbulento, filamentos, descargas eléctricas y chispas que se absorben en espiral).
 2. **Fusión**: al juntar las manos las dos energías se conectan con arcos, se funden en una sola
    esfera más grande, con destello y onda expansiva.
 3. **Lanzamiento**: al empujar, sale el haz hacia donde mueves las manos (o hacia la cámara si
    empujas al frente), con sacudida de cámara, destello y chispas.
 4. **Aura** alrededor de tu silueta: llamas que suben, halo, luz de borde y partículas de ki.
+5. **Cámara lenta** con rampa: frena en la fusión y el ataque, con cuadros intermedios por
+   compensación de movimiento para que se vea fluido.
+6. **Efectos de sonido** sintetizados: rugido del aura, zumbido de ki que sube con la carga,
+   chispazos, impacto en la fusión, carga creciente y explosión del ataque.
 
 Para que parezca real: todo se compone en luz lineal HDR, la energía **ilumina tu piel y la ropa**
 (luz que rebota), hay *bloom* de lente, distorsión por calor, aberración cromática, grano que
@@ -24,10 +28,12 @@ python -m goku_fx mi_video.mp4                       # → mi_video_kamehameha.m
 python -m goku_fx mi_video.mp4 --aura dorado         # aura Super Saiyajin
 python -m goku_fx mi_video.mp4 --escala 0.5          # vista previa rápida
 python -m goku_fx mi_video.mp4 --debug               # dibuja el esqueleto de las manos
+python -m goku_fx mi_video.mp4 --lento no            # sin cámara lenta (o --lento 0.5 fijo)
+python -m goku_fx mi_video.mp4 --sin-sonido          # sin efectos de sonido
 ```
 
 Colores (`--energia` y `--aura`): `kamehameha`, `azul`, `dorado`, `blanco`, `morado`, `rojo`;
-`--aura no` lo quita. El audio original se conserva.
+`--aura no` lo quita. Los videos HDR de iPhone se convierten a SDR automáticamente.
 
 ## Ajustar los tiempos
 
@@ -55,8 +61,12 @@ re-renderizar con otros colores o tiempos es rápido.
 
 ## Cómo funciona
 
+- `goku_fx/prep.py` — HDR → SDR y cuadros intermedios a 120 fps para la cámara lenta.
 - `goku_fx/track.py` — MediaPipe Hand Landmarker (21 puntos por mano) y segmentación de persona;
-  mantiene la identidad de cada mano, rellena huecos cortos y suaviza sin retraso (es offline).
+  si una mano se pierde, la vuelve a buscar con zoom donde estaba; mantiene la identidad de cada
+  mano, rellena huecos cortos y suaviza sin retraso (es offline).
+- `goku_fx/retime.py` — rampa de velocidad para la cámara lenta.
+- `goku_fx/sfx.py` — síntesis de los efectos de sonido a partir de lo que pasa en cada cuadro.
 - `goku_fx/timeline.py` — detecta carga, fusión y lanzamiento a partir de distancia y velocidad de las manos.
 - `goku_fx/fx.py` — plasma, rayos, partículas, haz, aura, bloom y tonemap.
-- `goku_fx/render.py` — compone cada cuadro y lo codifica con ffmpeg (H.264, audio original).
+- `goku_fx/render.py` — compone cada cuadro y lo codifica con ffmpeg (H.264).

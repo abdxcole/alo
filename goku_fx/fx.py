@@ -117,12 +117,14 @@ def draw_bolt(A, p0, p1, rng, color, rough=0.32, branches=1):
 
 def orb_bolts(A, c, R, energy, rng, pal, rate=2.5):
     """Descargas eléctricas que saltan de la superficie de la esfera (nuevas cada cuadro, como un arco real)."""
-    for _ in range(rng.poisson(rate * energy)):
+    count = rng.poisson(rate * energy)
+    for _ in range(count):
         a = rng.uniform(0, TAU)
         p0 = c + 0.55 * R * np.array([np.cos(a), np.sin(a)])
         a2 = a + rng.normal() * 0.5
         p1 = c + R * rng.uniform(1.3, 2.6) * np.array([np.cos(a2), np.sin(a2)])
         draw_bolt(A, p0, p1, rng, (pal.mid * 0.6 + pal.fil * 0.4) * rng.uniform(0.7, 1.4) * energy)
+    return count
 
 
 class Particles:
@@ -271,7 +273,7 @@ def aura(E, mask, t, level, pal, noise, dt_hint=1 / 30):
     E += level * (A[..., None] * col * 0.75 + rim[..., None] * (pal.mid * 0.8 + pal.core * 0.3) * 0.6)
 
 
-def aura_sparks(parts, mask, level, rng, pal, H):
+def aura_sparks(parts, mask, level, rng, pal, H, rate=1.0):
     """Partículas de ki que se desprenden de la silueta y suben."""
     if level <= 0.05:
         return
@@ -280,7 +282,7 @@ def aura_sparks(parts, mask, level, rng, pal, H):
     ys, xs = np.nonzero(edge)
     if len(xs) == 0:
         return
-    for _ in range(rng.poisson(2 * level)):
+    for _ in range(rng.poisson(2 * level * rate)):
         i = rng.integers(len(xs))
         x, y = xs[i] * 4.0, ys[i] * 4.0
         parts.spawn_free((x + rng.normal() * 4, y), (rng.normal() * 15, -rng.uniform(0.18, 0.45) * H),

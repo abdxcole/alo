@@ -45,12 +45,18 @@ def track_video(path, max_hands=2):
         running_mode=vision.RunningMode.VIDEO, num_hands=max_hands,
         min_hand_detection_confidence=0.35, min_hand_presence_confidence=0.35,
         min_tracking_confidence=0.35))
+    # segundo detector para re-buscar con zoom una mano que se perdió (desenfoque, mano pequeña)
+    zoom = vision.HandLandmarker.create_from_options(vision.HandLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=model_path("hand_landmarker.task")),
+        running_mode=vision.RunningMode.IMAGE, num_hands=1,
+        min_hand_detection_confidence=0.3, min_hand_presence_confidence=0.3))
     seg = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
         base_options=BaseOptions(model_asset_path=model_path("selfie_multiclass.tflite")),
         running_mode=vision.RunningMode.VIDEO, output_confidence_masks=True))
 
     cap, fps = open_video(path)
     raw, masks = [], []
+    recent = []  # [(centro, escala, cuadro)] de las manos vistas hace poco
     i = 0
     h = w = 0
     while True:
@@ -67,6 +73,20 @@ def track_video(path, max_hands=2):
         for lms, hd in zip(res.hand_landmarks, res.handedness):
             pts = np.array([[p.x * w, p.y * h, p.z * w] for p in lms], np.float32)
             dets.append((pts, hd[0].score))
+        recent = [r for r in recent if i - r[2] <= int(0.4 * fps)]
+        for c0, s0, _ in recent:
+            if len(dets) >= max_hands:
+                break
+            if any(np.linalg.norm(d[0][:, :2].mean(0) - c0) < 1.2 * s0 for d in dets):
+                continue
+            found = _zoom_detect(zoom, mp, rgb, c0, s0)
+            if found is not None and not any(
+                    np.linalg.norm(d[0][:, :2].mean(0) - found[0][:, :2].mean(0)) < 0.8 * s0 for d in dets):
+                dets.append(found)
+        for d in dets:
+            if d[1] > 0.5:
+                c = d[0][:, :2].mean(0)
+                recent = [r for r in recent if np.linalg.norm(r[0] - c) > 1.2 * r[1]] + [(c, _hand_scale(d[0]), i)]
         raw.append(dets)
 
         sm = seg.segment_for_video(img, ts)
@@ -80,12 +100,32 @@ def track_video(path, max_hands=2):
             print(f"  análisis: {i} cuadros", end="\r", flush=True)
     cap.release()
     hands.close()
+    zoom.close()
     seg.close()
     print(f"  análisis: {i} cuadros listos")
 
     lm, present = assign_tracks(raw, i)
     return {"lm": lm, "present": present, "masks": np.stack(masks), "fps": np.float32(fps),
             "size": np.array([w, h], np.int32)}
+
+
+def _zoom_detect(det, mp, rgb, c, s, out=448):
+    """Recorta alrededor de donde estaba la mano, amplía y vuelve a detectar."""
+    h, w = rgb.shape[:2]
+    half = max(3.2 * s, 60)
+    x0, y0 = int(max(0, c[0] - half)), int(max(0, c[1] - half))
+    x1, y1 = int(min(w, c[0] + half)), int(min(h, c[1] + half))
+    if x1 - x0 < 20 or y1 - y0 < 20:
+        return None
+    crop = cv2.resize(rgb[y0:y1, x0:x1], (out, out), interpolation=cv2.INTER_CUBIC)
+    res = det.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(crop)))
+    if not res.hand_landmarks:
+        return None
+    sx, sy = (x1 - x0), (y1 - y0)
+    pts = np.array([[x0 + p.x * sx, y0 + p.y * sy, p.z * sx] for p in res.hand_landmarks[0]], np.float32)
+    if np.linalg.norm(pts[:, :2].mean(0) - c) > 2.5 * s:
+        return None
+    return pts, res.handedness[0][0].score
 
 
 def assign_tracks(raw, n):
@@ -126,7 +166,7 @@ def _hand_scale(pts):
     return float(np.linalg.norm(pts[0, :2] - pts[9, :2]))
 
 
-def smooth_tracks(lm, present, fps, sigma_s=0.045):
+def smooth_tracks(lm, present, fps, sigma_s=0.06):
     """Interpola huecos cortos y suaviza sin retraso (filtro gaussiano centrado, es un proceso offline).
 
     Devuelve landmarks suavizados y un alfa de presencia 0..1 con fundidos suaves."""
